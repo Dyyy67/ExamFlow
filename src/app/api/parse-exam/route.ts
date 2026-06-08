@@ -270,7 +270,11 @@ Return ONLY valid JSON. Do not add any explanatory text.`;
       throw new Error('No sections were extracted from the document. Please ensure the file contains valid exam content.');
     }
 
-    return NextResponse.json(result);
+    // Return only the sections - preserve exam metadata on the frontend
+    return NextResponse.json({
+      sections: result.sections,
+      total_questions: result.sections.reduce((sum: number, sec: any) => sum + (sec.items?.length || 0), 0)
+    });
 
   } catch (error: any) {
     console.error('Error parsing exam document:', error);

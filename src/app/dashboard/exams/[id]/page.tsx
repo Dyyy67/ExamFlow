@@ -220,6 +220,30 @@ export default function ExamDetailPage() {
       
       setAnswerKey(result);
       addToast('success', 'Document parsed and answer key populated successfully!');
+      
+      // Auto-save the parsed answer key to database
+      setIsSaving(true);
+      let total = 0;
+      if (result.sections && Array.isArray(result.sections)) {
+        result.sections.forEach((sec: AnswerKeySection) => total += sec.items?.length || 0);
+      }
+
+      const { error: saveError } = await supabase
+        .from('exams')
+        .update({
+          answer_key: result,
+          total_items: total
+        })
+        .eq('id', examId);
+
+      setIsSaving(false);
+      if (saveError) {
+        addToast('warning', 'Parsed data loaded but auto-save failed. Please click Save to preserve changes.');
+      } else {
+        addToast('success', 'Answer key auto-saved!');
+        // Update exam in state
+        setExam(prev => prev ? { ...prev, answer_key: result, total_items: total } : null);
+      }
     } catch (err: any) {
       addToast('error', err.message || 'Failed to parse document');
     } finally {
