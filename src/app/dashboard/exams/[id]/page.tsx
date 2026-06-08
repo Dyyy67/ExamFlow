@@ -238,7 +238,7 @@ export default function ExamDetailPage() {
 
       setIsSaving(false);
       if (saveError) {
-        addToast('warning', 'Parsed data loaded but auto-save failed. Please click Save to preserve changes.');
+        addToast('info', 'Parsed data loaded but auto-save failed. Please click Save to preserve changes.');
       } else {
         addToast('success', 'Answer key auto-saved!');
         // Update exam in state
