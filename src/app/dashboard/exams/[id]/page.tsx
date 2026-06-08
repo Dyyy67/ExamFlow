@@ -218,20 +218,27 @@ export default function ExamDetailPage() {
         return;
       }
       
-      setAnswerKey(result);
+      // Merge parsed sections with existing exam metadata
+      const mergedAnswerKey = {
+        ...exam.answer_key,
+        sections: result.sections || [],
+        total_questions: result.total_questions || 0
+      };
+      
+      setAnswerKey(mergedAnswerKey);
       addToast('success', 'Document parsed and answer key populated successfully!');
       
       // Auto-save the parsed answer key to database
       setIsSaving(true);
       let total = 0;
-      if (result.sections && Array.isArray(result.sections)) {
-        result.sections.forEach((sec: AnswerKeySection) => total += sec.items?.length || 0);
+      if (mergedAnswerKey.sections && Array.isArray(mergedAnswerKey.sections)) {
+        mergedAnswerKey.sections.forEach((sec: AnswerKeySection) => total += sec.items?.length || 0);
       }
 
       const { error: saveError } = await supabase
         .from('exams')
         .update({
-          answer_key: result,
+          answer_key: mergedAnswerKey,
           total_items: total
         })
         .eq('id', examId);
@@ -242,7 +249,7 @@ export default function ExamDetailPage() {
       } else {
         addToast('success', 'Answer key auto-saved!');
         // Update exam in state
-        setExam(prev => prev ? { ...prev, answer_key: result, total_items: total } : null);
+        setExam(prev => prev ? { ...prev, answer_key: mergedAnswerKey, total_items: total } : null);
       }
     } catch (err: any) {
       addToast('error', err.message || 'Failed to parse document');

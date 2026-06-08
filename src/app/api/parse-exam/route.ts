@@ -39,6 +39,8 @@ const AnswerKeySectionSchema = z.object({
 const AnswerKeySchema = z.object({
   exam_title: z.string().optional().describe('Exam or test name'),
   exam_type: z.string().optional().describe('Type of exam (midterm, final, quiz, etc)'),
+  exam_language: z.string().optional().describe('Language of the exam (English, Spanish, French, etc.)'),
+  exam_subject: z.string().optional().describe('Academic subject (Mathematics, Biology, History, etc.)'),
   total_questions: z.number().optional().describe('Total number of questions'),
   sections: z.array(AnswerKeySectionSchema).describe('Question sections')
 }).strict();
@@ -185,39 +187,39 @@ export async function POST(req: NextRequest) {
     }
 
     // 5. Generate structured answer key using Vercel AI SDK
-    const systemPrompt = `You are an expert exam and test parser. Your job is to:
-1. Identify the exam type (multiple choice test, true/false quiz, essay exam, etc.)
-2. Parse all sections and questions
-3. Detect and extract the correct answers
-4. Organize everything into a structured format
+    const systemPrompt = `You are an EXPERT exam parser with STRICT accuracy requirements. Your analysis must be PRECISE and VERIFIABLE.
 
-QUESTION TYPE DETECTION:
-- mc: Multiple Choice questions with options (A, B, C, D, etc). Include all choices in the 'choices' array.
-- tf: True/False questions. Answer is either "T" or "F".
-- matching: Matching questions where items link to a list. Include all options in 'choices' array.
-- word_bank: Fill-in-the-blank using words from a provided list. Include all words in 'word_bank' array.
-- fill_blank: Fill-in-the-blank with free-form answer (word or phrase).
-- short_answer: Short answer questions. Set answer to null if not provided.
-- essay: Essay or extended response questions. Set answer to null.
+MANDATORY DETECTION TASKS:
+1. LANGUAGE DETECTION: Identify the primary language of the exam (English, Spanish, French, etc.) and set exam_language field accordingly
+2. SUBJECT DETECTION: Identify the academic subject (Mathematics, Biology, History, Chemistry, Physics, Literature, etc.) based on content, terminology, and question types
+3. TEST TYPE DETECTION: Classify as (midterm, final, quiz, practice test, homework, standardized test, entrance exam, certification test)
+4. QUESTION TYPE CLASSIFICATION: For each question, accurately identify the type from: mc, tf, matching, word_bank, fill_blank, short_answer, essay
+5. ANSWER KEY EXTRACTION: Extract ALL correct answers with 100% accuracy from the document
 
-ANSWER KEY DETECTION:
-Look for:
-- Explicit answer keys (often marked "Answer Key", "Key", "Answers", or "Solutions")
-- Answers in parentheses like (A), (B), (T), (F)
-- Answers marked with *, bold, underline, or different formatting
-- Answer sheets or rubrics at the end
-- Model answers or sample responses
+STRICT RULES - NO EXCEPTIONS:
+- Question numbers MUST be consecutive integers starting from 1 (no gaps, no duplicates)
+- Every question MUST have a non-empty 'prompt' field containing the FULL question text
+- For MC questions: answer must be exactly one letter (A, B, C, D, or E if present)
+- For TF questions: answer must be exactly "T" or "F" (uppercase only)
+- For matching questions: include ALL options in the 'choices' array in the order they appear
+- For word_bank questions: include ALL words in the 'word_bank' array exactly as provided
+- For fill_blank: answer is the word/phrase that fills the blank (if provided in answer key)
+- For short_answer/essay: answer must be null (these require manual grading)
+- Points must be a positive integer (default 1 if not specified)
+- If an answer key is present in the document, YOU MUST USE IT - do not attempt to solve questions
+- If no answer key is present, leave answer fields as null and DO NOT guess or attempt to solve
+- Exam title: extract from document header or title (if unclear, use null)
+- Exam type: infer from context clues (midterm, final, chapter test, unit quiz, etc.)
+- Subject: be specific (e.g., "Algebra II" not just "Math", "AP Biology" not just "Biology")
 
-RULES:
-- Question numbers must be CONSECUTIVE (1, 2, 3... across all sections)
-- Each question MUST have a 'prompt' field with the full question text or description
-- For multiple choice: answer should be JUST THE LETTER (e.g., "A", "B", "C", "D")
-- For true/false: answer should be "T" or "F"
-- If no answer is found for a question, use null
-- Include exam title if available
-- Include exam type if identifiable
+OUTPUT FORMAT:
+Return ONLY a valid JSON object matching the schema. Do NOT include:
+- Explanatory text before or after JSON
+- Markdown code blocks
+- Additional fields not in the schema
+- Comments or notes
 
-Return ONLY valid JSON. Do not add any explanatory text.`;
+If you cannot determine an answer with certainty, use null. Accuracy over completeness.`
 
     const truncatedText = documentText.length > 15000 
       ? documentText.substring(0, 15000) + '\n... [document truncated]'
