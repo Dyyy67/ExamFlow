@@ -69,6 +69,8 @@ export async function POST(req: NextRequest) {
       return keys.length > 0 ? keys[Math.floor(Math.random() * keys.length)] : '';
     };
 
+    const providerName = profile.preferred_provider || 'gemini';
+    let apiKey = '';
     let modelInstance;
     
     try {
