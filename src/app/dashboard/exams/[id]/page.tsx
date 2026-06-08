@@ -188,7 +188,16 @@ export default function ExamDetailPage() {
         body: formData,
       });
       
-      const result = await response.json();
+      // Check if response is valid JSON before parsing
+      const contentType = response.headers.get('content-type');
+      let result;
+      try {
+        result = await response.json();
+      } catch (parseError) {
+        // If JSON parsing fails, the server likely returned an error page (HTML)
+        const text = await response.text();
+        throw new Error(`Server returned an invalid response. Status: ${response.status}. ${text.substring(0, 200)}`);
+      }
       
       if (!response.ok) {
         // If the keys are not configured, display a link to Settings in the Toast

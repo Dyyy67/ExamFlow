@@ -22,17 +22,17 @@ const QuestionTypeSchema = z.enum([
 
 const AnswerKeyItemSchema = z.object({
   num: z.number().describe('The question number'),
-  answer: z.string().nullable().describe('The correct answer. For MC: A, B, C, or D. For TF: T or F. For matching/word bank: the matching letter/word. For fill blank: the correct word/phrase. For short answer: null.'),
-  prompt: z.string().optional().describe('Brief description or snippet of the question prompt'),
+  answer: z.string().nullable().optional().describe('The correct answer (or null for short answer)'),
+  prompt: z.string().optional().describe('Brief snippet of the question'),
   points: z.number().optional().default(1).describe('Points for this question')
 });
 
 const AnswerKeySectionSchema = z.object({
-  name: z.string().describe('The name of the section, e.g., Part I: Multiple Choice'),
+  name: z.string().describe('Section name (e.g., Part I: Multiple Choice)'),
   type: QuestionTypeSchema,
   items: z.array(AnswerKeyItemSchema),
-  choices: z.array(z.string()).optional().describe('Array of choices for Multiple Choice or Matching, e.g. ["A", "B", "C", "D"]'),
-  word_bank: z.array(z.string()).optional().describe('List of words in the word bank')
+  choices: z.array(z.string()).optional().describe('Array of choices for MC/Matching'),
+  word_bank: z.array(z.string()).optional().describe('List of words for word bank')
 });
 
 const AnswerKeySchema = z.object({
@@ -62,10 +62,6 @@ export async function POST(req: NextRequest) {
       }, { status: 400 });
     }
 
-    const providerName = profile.preferred_provider || 'gemini';
-    let apiKey = '';
-    let modelInstance;
-
     // 3. Initialize AI provider based on preference
     const getRandomKey = (rawStr: string | null) => {
       if (!rawStr) return '';
@@ -73,31 +69,27 @@ export async function POST(req: NextRequest) {
       return keys.length > 0 ? keys[Math.floor(Math.random() * keys.length)] : '';
     };
 
+    let modelInstance;
+    
     try {
       if (providerName === 'gemini') {
         apiKey = getRandomKey(profile.gemini_key);
         if (!apiKey) {
-          return NextResponse.json({ 
-            error: 'Gemini API key is not configured. Please add it on the Settings page.' 
-          }, { status: 400 });
+          throw new Error('Gemini API key is not configured. Please add it on the Settings page.');
         }
         const provider = createGoogleGenerativeAI({ apiKey });
         modelInstance = provider('gemini-2.5-flash');
       } else if (providerName === 'mistral') {
         apiKey = getRandomKey(profile.mistral_key);
         if (!apiKey) {
-          return NextResponse.json({ 
-            error: 'Mistral API key is not configured. Please add it on the Settings page.' 
-          }, { status: 400 });
+          throw new Error('Mistral API key is not configured. Please add it on the Settings page.');
         }
         const provider = createMistral({ apiKey });
         modelInstance = provider('mistral-large-latest');
       } else if (providerName === 'groq') {
         apiKey = getRandomKey(profile.groq_key);
         if (!apiKey) {
-          return NextResponse.json({ 
-            error: 'Groq API key is not configured. Please add it on the Settings page.' 
-          }, { status: 400 });
+          throw new Error('Groq API key is not configured. Please add it on the Settings page.');
         }
         const provider = createOpenAI({
           baseURL: 'https://api.groq.com/openai/v1',
@@ -107,9 +99,7 @@ export async function POST(req: NextRequest) {
       } else if (providerName === 'openrouter') {
         apiKey = getRandomKey(profile.openrouter_key);
         if (!apiKey) {
-          return NextResponse.json({ 
-            error: 'OpenRouter API key is not configured. Please add it on the Settings page.' 
-          }, { status: 400 });
+          throw new Error('OpenRouter API key is not configured. Please add it on the Settings page.');
         }
         const provider = createOpenAI({
           baseURL: 'https://openrouter.ai/api/v1',
@@ -117,10 +107,10 @@ export async function POST(req: NextRequest) {
         });
         modelInstance = provider('google/gemini-2.5-flash');
       } else {
-        return NextResponse.json({ error: `Unsupported provider: ${providerName}` }, { status: 400 });
+        throw new Error(`Unsupported provider: ${providerName}`);
       }
     } catch (err: any) {
-      return NextResponse.json({ error: `Provider initialization failed: ${err.message}` }, { status: 400 });
+      throw new Error(`Provider initialization failed: ${err.message}`);
     }
 
     // 4. Extract text from uploaded document
@@ -189,38 +179,53 @@ export async function POST(req: NextRequest) {
     }
 
     // 5. Generate structured answer key using Vercel AI SDK
-    const systemPrompt = `You are an expert exam parser. Analyze the provided exam text, extract the questions, detect their types, and build the Answer Key.
+    const systemPrompt = `You are an expert exam parser. Your task is to parse the exam document and extract a structured answer key.
 
-    Analyze the test content, look for any explicit answer key if provided at the end of the text or marked in the questions (e.g. bolded answers, answers in parentheses like "(A)", or answers followed by an asterisk "*").
-    If no answer key is explicitly provided, try to solve the questions to find the correct answer, or leave the answers empty/null if they cannot be determined.
-    
-    Here are the supported question types:
-    - mc: Multiple Choice. Questions with option letters (A, B, C, D). Always populate the choices array (e.g., ["A", "B", "C", "D"]).
-    - tf: True or False. Answers must be "T" or "F".
-    - matching: Matching Type. Questions mapping prompts to a list of choices (e.g., Column A matching with Column B).
-    - word_bank: Word Bank. Questions where answers are selected from a provided list of words. Populate the word_bank array.
-    - fill_blank: Fill in the Blank. Correct answers are words or short phrases.
-    - short_answer: Short Answer / Essay. Requires manual grading, set the answer field to null.
-    
-    Crucial rules:
-    1. Keep question numbering consecutive across the entire exam (e.g. Section 1 has 1-10, Section 2 starts with 11, NOT 1).
-    2. Try to populate the 'prompt' field with a very short snippet/summary of the question text to help the teacher identify it.
-    3. If you find an Answer Key section at the end of the document, prioritize its answers.
-    4. Ensure the returned JSON strictly adheres to the requested Zod schema.`;
+For each section or question group, identify:
+1. The section name (e.g., "Part 1: Multiple Choice")
+2. The question type (mc, tf, matching, word_bank, fill_blank, or short_answer)
+3. Each question with: number, answer, prompt (brief snippet), and points
+4. For MC/Matching questions, include the choices array
+5. For word_bank questions, include the word_bank array
+
+IMPORTANT RULES:
+- Question numbers must be consecutive across all sections
+- Always try to find the correct answers from an answer key if present in the document
+- For MC questions with options A, B, C, D - the answer should be the letter
+- For True/False - the answer should be "T" or "F"
+- For fill-in-blank questions - the answer should be the word or phrase
+- For short answer/essay - set answer to null
+- Always include a prompt field with a brief snippet of the question
+
+Return ONLY valid JSON that matches the structure requested.`;
+
+    const truncatedText = documentText.length > 12000 
+      ? documentText.substring(0, 12000) + '\n... [document truncated for processing]'
+      : documentText;
 
     const { object } = await generateObject({
       model: modelInstance,
       schema: AnswerKeySchema,
-      prompt: `Please parse the following exam document:\n\n${documentText}`,
+      prompt: `Parse this exam document and extract the answer key structure:\n\n${truncatedText}`,
       system: systemPrompt,
+      temperature: 0.2,
+      maxTokens: 4000,
     });
+
+    if (!object.sections || !Array.isArray(object.sections) || object.sections.length === 0) {
+      throw new Error('No sections were extracted from the document. Please ensure the file contains valid exam content.');
+    }
 
     return NextResponse.json(object);
 
   } catch (error: any) {
     console.error('Error parsing exam document:', error);
+    // Ensure we always return JSON, never HTML error pages
+    const errorMessage = error?.message || 'An unexpected error occurred during exam parsing.';
+    const statusCode = error?.status || 500;
     return NextResponse.json({ 
-      error: error.message || 'An unexpected error occurred during exam parsing.' 
-    }, { status: 500 });
+      error: errorMessage,
+      details: error?.cause?.message || undefined
+    }, { status: statusCode, headers: { 'Content-Type': 'application/json' } });
   }
 }
