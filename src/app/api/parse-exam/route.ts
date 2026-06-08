@@ -17,27 +17,31 @@ const QuestionTypeSchema = z.enum([
   'matching',
   'word_bank',
   'fill_blank',
-  'short_answer'
+  'short_answer',
+  'essay'
 ]);
 
 const AnswerKeyItemSchema = z.object({
-  num: z.number().describe('The question number'),
-  answer: z.string().nullable().optional().describe('The correct answer (or null for short answer)'),
-  prompt: z.string().optional().describe('Brief snippet of the question'),
-  points: z.number().optional().default(1).describe('Points for this question')
-});
+  num: z.number().describe('Question number'),
+  answer: z.string().nullable().optional().describe('Correct answer'),
+  prompt: z.string().describe('Question text or description'),
+  points: z.number().optional().default(1).describe('Points awarded')
+}).strict();
 
 const AnswerKeySectionSchema = z.object({
-  name: z.string().describe('Section name (e.g., Part I: Multiple Choice)'),
-  type: QuestionTypeSchema,
-  items: z.array(AnswerKeyItemSchema),
-  choices: z.array(z.string()).optional().describe('Array of choices for MC/Matching'),
-  word_bank: z.array(z.string()).optional().describe('List of words for word bank')
-});
+  name: z.string().describe('Section name'),
+  type: QuestionTypeSchema.describe('Question type'),
+  items: z.array(AnswerKeyItemSchema).describe('Questions in this section'),
+  choices: z.array(z.string()).optional().describe('Answer choices for MC'),
+  word_bank: z.array(z.string()).optional().describe('Word bank options')
+}).strict();
 
 const AnswerKeySchema = z.object({
-  sections: z.array(AnswerKeySectionSchema)
-});
+  exam_title: z.string().optional().describe('Exam or test name'),
+  exam_type: z.string().optional().describe('Type of exam (midterm, final, quiz, etc)'),
+  total_questions: z.number().optional().describe('Total number of questions'),
+  sections: z.array(AnswerKeySectionSchema).describe('Question sections')
+}).strict();
 
 export async function POST(req: NextRequest) {
   try {
@@ -181,43 +185,92 @@ export async function POST(req: NextRequest) {
     }
 
     // 5. Generate structured answer key using Vercel AI SDK
-    const systemPrompt = `You are an expert exam parser. Your task is to parse the exam document and extract a structured answer key.
+    const systemPrompt = `You are an expert exam and test parser. Your job is to:
+1. Identify the exam type (multiple choice test, true/false quiz, essay exam, etc.)
+2. Parse all sections and questions
+3. Detect and extract the correct answers
+4. Organize everything into a structured format
 
-For each section or question group, identify:
-1. The section name (e.g., "Part 1: Multiple Choice")
-2. The question type (mc, tf, matching, word_bank, fill_blank, or short_answer)
-3. Each question with: number, answer, prompt (brief snippet), and points
-4. For MC/Matching questions, include the choices array
-5. For word_bank questions, include the word_bank array
+QUESTION TYPE DETECTION:
+- mc: Multiple Choice questions with options (A, B, C, D, etc). Include all choices in the 'choices' array.
+- tf: True/False questions. Answer is either "T" or "F".
+- matching: Matching questions where items link to a list. Include all options in 'choices' array.
+- word_bank: Fill-in-the-blank using words from a provided list. Include all words in 'word_bank' array.
+- fill_blank: Fill-in-the-blank with free-form answer (word or phrase).
+- short_answer: Short answer questions. Set answer to null if not provided.
+- essay: Essay or extended response questions. Set answer to null.
 
-IMPORTANT RULES:
-- Question numbers must be consecutive across all sections
-- Always try to find the correct answers from an answer key if present in the document
-- For MC questions with options A, B, C, D - the answer should be the letter
-- For True/False - the answer should be "T" or "F"
-- For fill-in-blank questions - the answer should be the word or phrase
-- For short answer/essay - set answer to null
-- Always include a prompt field with a brief snippet of the question
+ANSWER KEY DETECTION:
+Look for:
+- Explicit answer keys (often marked "Answer Key", "Key", "Answers", or "Solutions")
+- Answers in parentheses like (A), (B), (T), (F)
+- Answers marked with *, bold, underline, or different formatting
+- Answer sheets or rubrics at the end
+- Model answers or sample responses
 
-Return ONLY valid JSON that matches the structure requested.`;
+RULES:
+- Question numbers must be CONSECUTIVE (1, 2, 3... across all sections)
+- Each question MUST have a 'prompt' field with the full question text or description
+- For multiple choice: answer should be JUST THE LETTER (e.g., "A", "B", "C", "D")
+- For true/false: answer should be "T" or "F"
+- If no answer is found for a question, use null
+- Include exam title if available
+- Include exam type if identifiable
 
-    const truncatedText = documentText.length > 12000 
-      ? documentText.substring(0, 12000) + '\n... [document truncated for processing]'
+Return ONLY valid JSON. Do not add any explanatory text.`;
+
+    const truncatedText = documentText.length > 15000 
+      ? documentText.substring(0, 15000) + '\n... [document truncated]'
       : documentText;
 
-    const { object } = await generateObject({
-      model: modelInstance,
-      schema: AnswerKeySchema,
-      prompt: `Parse this exam document and extract the answer key structure:\n\n${truncatedText}`,
-      system: systemPrompt,
-      temperature: 0.2,
-    });
+    let result;
+    try {
+      const { object } = await generateObject({
+        model: modelInstance,
+        schema: AnswerKeySchema,
+        prompt: `Parse this exam document and extract the answer key structure:\n\n${truncatedText}`,
+        system: systemPrompt,
+        temperature: 0.3,
+      });
+      result = object;
+    } catch (schemaError: any) {
+      // If strict schema fails, try with more lenient parsing
+      console.error('Initial schema parsing failed:', schemaError.message);
+      
+      // Create a more lenient schema as fallback
+      const LenientAnswerKeySchema = z.object({
+        exam_title: z.string().optional(),
+        exam_type: z.string().optional(),
+        total_questions: z.number().optional(),
+        sections: z.array(z.object({
+          name: z.string(),
+          type: z.string(),
+          items: z.array(z.object({
+            num: z.number(),
+            answer: z.any().optional(),
+            prompt: z.string().optional(),
+            points: z.number().optional()
+          })).optional(),
+          choices: z.array(z.any()).optional(),
+          word_bank: z.array(z.any()).optional()
+        })).optional()
+      });
 
-    if (!object.sections || !Array.isArray(object.sections) || object.sections.length === 0) {
+      const { object: lenientObject } = await generateObject({
+        model: modelInstance,
+        schema: LenientAnswerKeySchema,
+        prompt: `Parse this exam document and extract questions and answers:\n\n${truncatedText}`,
+        system: systemPrompt,
+        temperature: 0.3,
+      });
+      result = lenientObject;
+    }
+
+    if (!result.sections || !Array.isArray(result.sections) || result.sections.length === 0) {
       throw new Error('No sections were extracted from the document. Please ensure the file contains valid exam content.');
     }
 
-    return NextResponse.json(object);
+    return NextResponse.json(result);
 
   } catch (error: any) {
     console.error('Error parsing exam document:', error);
