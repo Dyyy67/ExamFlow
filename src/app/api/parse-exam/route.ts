@@ -211,7 +211,6 @@ Return ONLY valid JSON that matches the structure requested.`;
       prompt: `Parse this exam document and extract the answer key structure:\n\n${truncatedText}`,
       system: systemPrompt,
       temperature: 0.2,
-      maxTokens: 4000,
     });
 
     if (!object.sections || !Array.isArray(object.sections) || object.sections.length === 0) {
