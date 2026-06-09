@@ -6,7 +6,8 @@ import { createMistral } from '@ai-sdk/mistral';
 import { createOpenAI } from '@ai-sdk/openai';
 import { z } from 'zod';
 import mammoth from 'mammoth';
-import * as PDFParse from 'pdf-parse';
+// @ts-ignore
+const PDFParse = require('pdf-parse');
 // @ts-ignore
 import WordExtractor from 'word-extractor';
 
