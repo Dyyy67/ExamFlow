@@ -6,8 +6,7 @@ import { createMistral } from '@ai-sdk/mistral';
 import { createOpenAI } from '@ai-sdk/openai';
 import { z } from 'zod';
 import mammoth from 'mammoth';
-// @ts-ignore
-const PDFParse = require('pdf-parse');
+import { PDFParse } from 'pdf-parse';
 // @ts-ignore
 import WordExtractor from 'word-extractor';
 
@@ -138,8 +137,10 @@ export async function POST(req: NextRequest) {
 
     if (file.name.toLowerCase().endsWith('.pdf')) {
       try {
-        const pdfData = await PDFParse(buffer);
-        documentText = pdfData.text || '';
+        const parser = new PDFParse({ data: new Uint8Array(bytes) });
+        const result = await parser.getText();
+        documentText = result?.text || '';
+        await parser.destroy();
       } catch (err: any) {
         return NextResponse.json({ error: `Failed to parse PDF document: ${err.message}` }, { status: 500 });
       }

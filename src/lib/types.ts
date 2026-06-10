@@ -38,11 +38,6 @@ export interface AnswerKeySection {
 }
 
 export interface AnswerKey {
-  exam_title?: string | null;
-  exam_type?: string | null;
-  exam_language?: string | null;
-  exam_subject?: string | null;
-  total_questions?: number;
   sections: AnswerKeySection[];
 }
 

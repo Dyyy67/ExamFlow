@@ -188,16 +188,7 @@ export default function ExamDetailPage() {
         body: formData,
       });
       
-      // Check if response is valid JSON before parsing
-      const contentType = response.headers.get('content-type');
-      let result;
-      try {
-        result = await response.json();
-      } catch (parseError) {
-        // If JSON parsing fails, the server likely returned an error page (HTML)
-        const text = await response.text();
-        throw new Error(`Server returned an invalid response. Status: ${response.status}. ${text.substring(0, 200)}`);
-      }
+      const result = await response.json();
       
       if (!response.ok) {
         // If the keys are not configured, display a link to Settings in the Toast
@@ -218,39 +209,8 @@ export default function ExamDetailPage() {
         return;
       }
       
-      // Merge parsed sections with existing exam metadata
-      const mergedAnswerKey = {
-        ...exam.answer_key,
-        sections: result.sections || [],
-        total_questions: result.total_questions || 0
-      };
-      
-      setAnswerKey(mergedAnswerKey);
+      setAnswerKey(result);
       addToast('success', 'Document parsed and answer key populated successfully!');
-      
-      // Auto-save the parsed answer key to database
-      setIsSaving(true);
-      let total = 0;
-      if (mergedAnswerKey.sections && Array.isArray(mergedAnswerKey.sections)) {
-        mergedAnswerKey.sections.forEach((sec: AnswerKeySection) => total += sec.items?.length || 0);
-      }
-
-      const { error: saveError } = await supabase
-        .from('exams')
-        .update({
-          answer_key: mergedAnswerKey,
-          total_items: total
-        })
-        .eq('id', examId);
-
-      setIsSaving(false);
-      if (saveError) {
-        addToast('info', 'Parsed data loaded but auto-save failed. Please click Save to preserve changes.');
-      } else {
-        addToast('success', 'Answer key auto-saved!');
-        // Update exam in state
-        setExam(prev => prev ? { ...prev, answer_key: mergedAnswerKey, total_items: total } : null);
-      }
     } catch (err: any) {
       addToast('error', err.message || 'Failed to parse document');
     } finally {
